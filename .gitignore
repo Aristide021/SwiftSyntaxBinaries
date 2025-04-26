@@ -1,0 +1,22 @@
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcarchive/
+
+# Build products
+build/
+DerivedData/
+*.framework/
+*.xcframework/
+*.zip
+
+# SwiftPM
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Temporary build directory
+temp/

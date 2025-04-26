@@ -1,0 +1,40 @@
+name: Build SwiftSyntax XCFramework
+
+on:
+  workflow_dispatch:
+    inputs:
+      swift_syntax_tag:
+        description: 'SwiftSyntax tag to build (e.g., 600.0.1)'
+        required: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build XCFramework
+        id: build
+        run: |
+          chmod +x ./scripts/build_xcframework.sh
+          ./scripts/build_xcframework.sh ${{ github.event.inputs.swift_syntax_tag }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.swift_syntax_tag }}
+          name: SwiftSyntax ${{ github.event.inputs.swift_syntax_tag }}
+          body: |
+            SwiftSyntax XCFramework for version ${{ github.event.inputs.swift_syntax_tag }}
+
+            Checksum: ${{ steps.build.outputs.checksum }}
+          files: |
+            ${{ steps.build.outputs.framework_zip }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
