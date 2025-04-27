@@ -1,22 +1,70 @@
 # Xcode
-*.xcodeproj
-*.xcworkspace
-xcuserdata/
-*.xcarchive/
+#
+# gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
 
-# Build products
+## User settings
+xcuserdata/
+
+## Build generated
 build/
 DerivedData/
-*.framework/
-*.xcframework/
-*.zip
+temp_build/
 
-# SwiftPM
+## Various settings
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+## Other
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+.DS_Store
+
+## Obj-C/Swift specific
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+#
+# Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
+Packages/
+Package.pins
+Package.resolved
 .build/
 .swiftpm/
 
-# macOS
-.DS_Store
+# CocoaPods
+#
+# We recommend against adding the Pods directory to your .gitignore. However
+# you should judge for yourself, the pros and cons are mentioned at:
+# https://guides.cocoapods.org/using/using-cocoapods.html#should-i-check-the-pods-directory-into-source-control
+#
+Pods/
 
-# Temporary build directory
-temp/
+# Carthage
+#
+# Add this line if you want to avoid checking in source code from Carthage dependencies.
+Carthage/Checkouts
+Carthage/Build/
+
+# SPM binary targets support
+*.xcframework
+*.xcframework.zip
+*.framework
+*.framework.zip
+
+# Project specific
+temp_experiment/swift-syntax/
+temp_build/
