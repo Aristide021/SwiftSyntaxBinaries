@@ -1,43 +1,138 @@
-name: Build SwiftSyntax XCFramework
+name: Build and Release Latest SwiftSyntax XCFramework
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual triggering (for testing or specific tag)
     inputs:
       swift_syntax_tag:
-        description: 'SwiftSyntax tag to build (e.g., 600.0.1)'
-        required: true
+        description: 'MANUAL SwiftSyntax tag to build (e.g., 601.0.1). If empty on manual run, tries latest.'
+        required: false
+      force_build:
+        description: 'Force build even if tag exists? (true/false)'
+        required: false
+        default: false
+        type: boolean
+
+  schedule:
+    - cron: '0 */6 * * *' # Runs every 6 hours (adjust as needed)
 
 jobs:
-  build:
+  check_and_build:
     runs-on: macos-latest
-    
-    # Add permissions to create releases
     permissions:
-      contents: write
-    
+      contents: write # To create releases
+    outputs: # Not strictly needed anymore if build is in same job, but good for clarity
+      tag_to_build: ${{ steps.get_release_info.outputs.tag_name }}
+      release_notes: ${{ steps.get_release_info.outputs.release_body }}
+      should_build: ${{ steps.get_release_info.outputs.should_build_flag }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI (gh)
+        run: |
+          # Ensure gh is available. macos-latest usually has it.
+          # If not, you might need: brew install gh
+          gh --version
+
+      - name: Get SwiftSyntax Release Information
+        id: get_release_info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub token for API calls
+          # GITHUB_REPOSITORY is your repo: ARISTIDE021/SwiftSyntaxBinaries
+        run: |
+          TARGET_TAG=""
+          FORCE_BUILD=${{ github.event.inputs.force_build || 'false' }}
+
+          # If a specific tag is provided via manual dispatch, use that.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.swift_syntax_tag }}" ]]; then
+            TARGET_TAG="${{ github.event.inputs.swift_syntax_tag }}"
+            echo "Manual trigger for specific tag: $TARGET_TAG"
+            # Fetch its release notes if it's a known release
+            RELEASE_INFO_JSON=$(gh api "repos/apple/swift-syntax/releases/tags/$TARGET_TAG" --ignore-errors || echo "{}")
+            IS_PRERELEASE=$(echo "$RELEASE_INFO_JSON" | jq -r '.prerelease // "false"') # Default to not prerelease if info missing
+
+            if [[ "$IS_PRERELEASE" == "true" && "$FORCE_BUILD" != "true" ]]; then
+                echo "Tag $TARGET_TAG is a pre-release. Skipping unless force_build is true."
+                echo "should_build_flag=false" >> $GITHUB_OUTPUT
+                exit 0
+            fi
+            RELEASE_BODY=$(echo "$RELEASE_INFO_JSON" | jq -r '.body // "No description available for this tag."')
+
+          else # Scheduled run or manual run without specific tag: Fetch latest official release
+            echo "Scheduled run or manual 'latest' run: Fetching latest stable release from apple/swift-syntax..."
+            # Get the latest non-prerelease, non-draft release
+            LATEST_RELEASE_JSON=$(gh api repos/apple/swift-syntax/releases/latest --ignore-errors)
+
+            if [[ -z "$LATEST_RELEASE_JSON" || "$(echo "$LATEST_RELEASE_JSON" | jq -e '.tag_name' 2>/dev/null)" == "null" ]]; then
+              echo "Could not fetch latest release information from apple/swift-syntax or no releases found."
+              echo "should_build_flag=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            TARGET_TAG=$(echo "$LATEST_RELEASE_JSON" | jq -r '.tag_name')
+            RELEASE_BODY=$(echo "$LATEST_RELEASE_JSON" | jq -r '.body')
+
+            if [[ -z "$TARGET_TAG" ]]; then
+                echo "Failed to extract tag_name from latest release."
+                echo "should_build_flag=false" >> $GITHUB_OUTPUT
+                exit 0
+            fi
+            echo "Latest official apple/swift-syntax release tag: $TARGET_TAG"
+          fi
+
+          # Check if this tag already has a release in ARISTIDE021/SwiftSyntaxBinaries
+          echo "Checking for existing release of $TARGET_TAG in ${{ github.repository }}..."
+          EXISTING_RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG" --ignore-errors)
+
+          if [[ -n "$EXISTING_RELEASE_JSON" && "$(echo "$EXISTING_RELEASE_JSON" | jq -e '.tag_name' 2>/dev/null)" != "null" && "$FORCE_BUILD" != "true" ]]; then
+            echo "Release for tag $TARGET_TAG already exists in ${{ github.repository }}. Nothing to do."
+            echo "should_build_flag=false" >> $GITHUB_OUTPUT
+          else
+            if [[ "$FORCE_BUILD" == "true" ]]; then
+                echo "Force building for tag $TARGET_TAG."
+            else
+                echo "New release $TARGET_TAG found (or no existing release). Proceeding to build."
+            fi
+            echo "should_build_flag=true" >> $GITHUB_OUTPUT
+            echo "tag_name=$TARGET_TAG" >> $GITHUB_OUTPUT
+            # Escape release body for multiline output
+            # Using a delimiter for multiline strings in GITHUB_OUTPUT
+            echo "release_body<<EOF_RELEASE_BODY" >> $GITHUB_OUTPUT
+            echo "$RELEASE_BODY" >> $GITHUB_OUTPUT
+            echo "EOF_RELEASE_BODY" >> $GITHUB_OUTPUT
+            echo "Tag and release body set for build."
+          fi
 
       - name: Set up Xcode
+        if: steps.get_release_info.outputs.should_build_flag == 'true'
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: latest-stable # Or specify a particular version
 
       - name: Build XCFramework
+        if: steps.get_release_info.outputs.should_build_flag == 'true'
         id: build
         run: |
+          TAG_TO_BUILD="${{ steps.get_release_info.outputs.tag_name }}"
+          echo "Building for tag: $TAG_TO_BUILD"
           chmod +x ./scripts/build_xcframework.sh
-          ./scripts/build_xcframework.sh ${{ github.event.inputs.swift_syntax_tag }}
+          ./scripts/build_xcframework.sh "$TAG_TO_BUILD"
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Create GitHub Release
+        if: steps.get_release_info.outputs.should_build_flag == 'true'
+        uses: softprops/action-gh-release@v1 # Consider v2 if available and stable
         with:
-          tag_name: ${{ github.event.inputs.swift_syntax_tag }}
-          name: SwiftSyntax ${{ github.event.inputs.swift_syntax_tag }}
+          tag_name: ${{ steps.get_release_info.outputs.tag_name }}
+          name: SwiftSyntax ${{ steps.get_release_info.outputs.tag_name }}
           body: |
-            SwiftSyntax XCFramework for version ${{ github.event.inputs.swift_syntax_tag }}
+            ${{ steps.get_release_info.outputs.release_notes }}
 
+            ---
             Checksum: ${{ steps.build.outputs.checksum }}
+            Automated build from official SwiftSyntax release.
+          # 'prerelease' field is not set here, so it defaults to 'false' (a stable release)
+          # which is what we want as we're sourcing from apple/swift-syntax's latest stable.
           files: |
             ${{ steps.build.outputs.framework_zip }}
         env:
