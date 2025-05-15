@@ -49,7 +49,7 @@ jobs:
             TARGET_TAG="${{ github.event.inputs.swift_syntax_tag }}"
             echo "Manual trigger for specific tag: $TARGET_TAG"
             # Fetch its release notes if it's a known release
-            RELEASE_INFO_JSON=$(gh api "repos/apple/swift-syntax/releases/tags/$TARGET_TAG" --ignore-errors || echo "{}")
+            RELEASE_INFO_JSON=$(gh api "repos/apple/swift-syntax/releases/tags/$TARGET_TAG" || echo "{}")
             IS_PRERELEASE=$(echo "$RELEASE_INFO_JSON" | jq -r '.prerelease // "false"') # Default to not prerelease if info missing
 
             if [[ "$IS_PRERELEASE" == "true" && "$FORCE_BUILD" != "true" ]]; then
@@ -62,7 +62,7 @@ jobs:
           else # Scheduled run or manual run without specific tag: Fetch latest official release
             echo "Scheduled run or manual 'latest' run: Fetching latest stable release from apple/swift-syntax..."
             # Get the latest non-prerelease, non-draft release
-            LATEST_RELEASE_JSON=$(gh api repos/apple/swift-syntax/releases/latest --ignore-errors)
+            LATEST_RELEASE_JSON=$(gh api repos/apple/swift-syntax/releases/latest)
 
             if [[ -z "$LATEST_RELEASE_JSON" || "$(echo "$LATEST_RELEASE_JSON" | jq -e '.tag_name' 2>/dev/null)" == "null" ]]; then
               echo "Could not fetch latest release information from apple/swift-syntax or no releases found."
@@ -83,7 +83,7 @@ jobs:
 
           # Check if this tag already has a release in ARISTIDE021/SwiftSyntaxBinaries
           echo "Checking for existing release of $TARGET_TAG in ${{ github.repository }}..."
-          EXISTING_RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG" --ignore-errors)
+          EXISTING_RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG")
 
           if [[ -n "$EXISTING_RELEASE_JSON" && "$(echo "$EXISTING_RELEASE_JSON" | jq -e '.tag_name' 2>/dev/null)" != "null" && "$FORCE_BUILD" != "true" ]]; then
             echo "Release for tag $TARGET_TAG already exists in ${{ github.repository }}. Nothing to do."
