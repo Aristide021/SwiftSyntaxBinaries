@@ -1,0 +1,1347 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+The content has been processed where content has been formatted for parsing in plain style.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Content has been formatted for parsing in plain style
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+.github/
+  workflows/
+    build_release.yml
+.repomix/
+scripts/
+  build_linux.sh
+  build_xcframework.sh
+.gitignore
+LICENSE
+Package.swift
+README.md
+
+================================================================
+Files
+================================================================
+
+================
+File: scripts/build_linux.sh
+================
+#!/bin/bash
+set -euo pipefail
+
+# Function to display usage
+usage() {
+    echo "Usage: $0 [-t] <swift-syntax-version>"
+    echo "  -t, --test  Test build locally without creating a GitHub release"
+    echo "  <swift-syntax-version> The version tag to build (e.g., 600.0.1)"
+    exit 1
+}
+
+# Parse arguments
+TEST_MODE=false
+SWIFT_SYNTAX_VERSION=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -t|--test)
+            TEST_MODE=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            if [[ -z "$SWIFT_SYNTAX_VERSION" ]]; then
+                SWIFT_SYNTAX_VERSION="$1"
+                shift
+            else
+                echo "Unknown parameter: $1"
+                usage
+            fi
+            ;;
+    esac
+done
+
+if [[ -z "$SWIFT_SYNTAX_VERSION" ]]; then
+    echo "Error: Swift Syntax version is required"
+    usage
+fi
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+REPO_ROOT_DIR="$SCRIPT_DIR/.."
+WORK_DIR="$REPO_ROOT_DIR/temp_build_linux"
+SWIFT_SYNTAX_DIR="$WORK_DIR/swift-syntax"
+WRAPPER_PKG_DIR="$WORK_DIR/SwiftSyntaxWrapperPkg"
+FINAL_TAR_NAME="SwiftSyntax-linux.tar.gz"
+REPO_URL="https://github.com/apple/swift-syntax.git"
+
+# Determine Swift tools version 
+SWIFT_VERSION=$(swift --version | head -n 1 | sed -E 's/.*Swift version ([0-9]+\.[0-9]+).*/\1/')
+echo "Detected Swift version: $SWIFT_VERSION"
+SWIFT_TOOLS_VERSION="5.7" # Default
+if [[ $(echo "$SWIFT_VERSION >= 5.9" | bc -l) -eq 1 ]]; then
+    SWIFT_TOOLS_VERSION="5.9"
+elif [[ $(echo "$SWIFT_VERSION >= 5.8" | bc -l) -eq 1 ]]; then
+    SWIFT_TOOLS_VERSION="5.8"
+fi
+echo "Using Swift tools version: $SWIFT_TOOLS_VERSION"
+
+# Clean up any previous build
+rm -rf "$WORK_DIR"
+mkdir -p "$WORK_DIR"
+
+# Step 1: Clone swift-syntax at the specified tag
+echo "Cloning swift-syntax $SWIFT_SYNTAX_VERSION..."
+git clone --branch "$SWIFT_SYNTAX_VERSION" --depth 1 "$REPO_URL" "$SWIFT_SYNTAX_DIR"
+
+# Step 2: Create the wrapper package
+echo "Creating SwiftSyntaxWrapper package..."
+mkdir -p "$WRAPPER_PKG_DIR/Sources/SwiftSyntaxWrapper"
+
+# Create Package.swift
+cat > "$WRAPPER_PKG_DIR/Package.swift" << EOF
+// swift-tools-version:$SWIFT_TOOLS_VERSION
+import PackageDescription
+
+let package = Package(
+    name: "SwiftSyntaxWrapperPkg",
+    platforms: [
+        .macOS(.v10_15),
+        .iOS(.v13),
+        .tvOS(.v13),
+        .watchOS(.v6),
+        .macCatalyst(.v13)
+    ],
+    products: [
+        .library(
+            name: "SwiftSyntaxWrapper",
+            type: .static,
+            targets: ["SwiftSyntaxWrapper"]
+        )
+    ],
+    dependencies: [
+        .package(path: "$SWIFT_SYNTAX_DIR")
+    ],
+    targets: [
+        .target(
+            name: "SwiftSyntaxWrapper",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftDiagnostics", package: "swift-syntax"),
+                .product(name: "SwiftBasicFormat", package: "swift-syntax"),
+                .product(name: "SwiftOperators", package: "swift-syntax"),
+                .product(name: "SwiftParserDiagnostics", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ]
+        )
+    ]
+)
+EOF
+
+# Create wrapper Swift file with @_exported imports
+cat > "$WRAPPER_PKG_DIR/Sources/SwiftSyntaxWrapper/SwiftSyntaxWrapper.swift" << EOF
+// This file re-exports all the necessary SwiftSyntax modules
+@_exported import SwiftSyntax
+@_exported import SwiftParser
+@_exported import SwiftSyntaxBuilder
+@_exported import SwiftSyntaxMacros
+@_exported import SwiftDiagnostics
+@_exported import SwiftBasicFormat
+@_exported import SwiftOperators
+@_exported import SwiftParserDiagnostics
+@_exported import SwiftSyntaxMacroExpansion
+@_exported import SwiftCompilerPlugin
+
+// No actual code is needed in this file.
+EOF
+
+# Step 3: Build for Linux
+echo "Building for Linux..."
+cd "$WRAPPER_PKG_DIR"
+
+echo "Resolving package dependencies..."
+swift package resolve
+
+echo "Building Linux static library with swift build..."
+swift build -c release --static-swift-stdlib
+
+# Step 4: Find the built library
+echo "Looking for built library..."
+LIB_FILE=$(find .build/release -name "libSwiftSyntaxWrapper.a" | head -n 1)
+if [ -z "$LIB_FILE" ]; then
+    echo "Could not find library in expected location, searching entire build directory..."
+    LIB_FILE=$(find .build -type f -name "*.a" | grep -i "SwiftSyntaxWrapper" | head -n 1)
+fi
+
+if [ -z "$LIB_FILE" ]; then
+    echo "Error: Could not find built library"
+    echo "Available .a files:"
+    find .build -name "*.a" | sort
+    exit 1
+fi
+
+echo "Found library at: $LIB_FILE"
+file "$LIB_FILE"
+
+# Step 5: Find Swift modules
+echo "Looking for Swift modules..."
+MODULE_DIR=$(find .build/release -path "*/SwiftSyntaxWrapper.swiftmodule" -type d | head -n 1)
+if [ -z "$MODULE_DIR" ]; then
+    echo "Module directory not found at expected path. Searching..."
+    MODULE_DIR=$(find .build -path "*SwiftSyntaxWrapper.swiftmodule" -type d | head -n 1)
+fi
+
+if [ -z "$MODULE_DIR" ]; then
+    echo "Warning: Could not find Swift module directory"
+    echo "Available .swiftmodule directories:"
+    find .build -name "*.swiftmodule" -type d | sort
+    
+    # Create basic module structure
+    MODULE_DIR="$WORK_DIR/SwiftSyntaxWrapper.swiftmodule"
+    mkdir -p "$MODULE_DIR"
+    
+    # Create basic module files
+    cat > "$MODULE_DIR/x86_64-unknown-linux-gnu.swiftinterface" << EOF
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version $SWIFT_VERSION
+// swift-module-flags: -target x86_64-unknown-linux-gnu -enable-objc-interop -enable-library-evolution -swift-version 5 -enforce-exclusivity=checked -O -module-name SwiftSyntaxWrapper
+// swift-module-flags-ignorable: -enable-bare-slash-regex
+import Swift
+@_exported import SwiftSyntax
+@_exported import SwiftParser
+@_exported import SwiftSyntaxBuilder
+@_exported import SwiftSyntaxMacros
+@_exported import SwiftDiagnostics
+@_exported import SwiftBasicFormat
+@_exported import SwiftOperators
+@_exported import SwiftParserDiagnostics
+@_exported import SwiftSyntaxMacroExpansion
+@_exported import SwiftCompilerPlugin
+EOF
+
+    # Create documentation file
+    touch "$MODULE_DIR/x86_64-unknown-linux-gnu.swiftdoc"
+    
+    echo "Created basic module structure at: $MODULE_DIR"
+else
+    echo "Found module at: $MODULE_DIR"
+fi
+
+# Step 6: Create distribution structure
+echo "Creating distribution structure..."
+DIST_DIR="$WORK_DIR/SwiftSyntax-linux"
+mkdir -p "$DIST_DIR/lib"
+mkdir -p "$DIST_DIR/include"
+
+# Copy library
+cp "$LIB_FILE" "$DIST_DIR/lib/libSwiftSyntaxWrapper.a"
+
+# Copy Swift modules
+if [ -d "$MODULE_DIR" ]; then
+    cp -r "$MODULE_DIR" "$DIST_DIR/include/"
+    echo "Copied Swift modules to distribution"
+else
+    echo "Warning: No Swift modules to copy"
+fi
+
+# Create usage instructions
+cat > "$DIST_DIR/README.md" << EOF
+# SwiftSyntax Linux Binary
+
+This package contains a prebuilt static library of SwiftSyntax for Linux.
+
+## Contents
+
+- \`lib/libSwiftSyntaxWrapper.a\` - Static library containing SwiftSyntax
+- \`include/SwiftSyntaxWrapper.swiftmodule/\` - Swift module interfaces
+
+## Usage
+
+### With Swift Package Manager
+
+Add this to your \`Package.swift\`:
+
+\`\`\`swift
+.systemLibrary(
+    name: "SwiftSyntaxWrapper",
+    pkgConfig: "SwiftSyntaxWrapper",
+    providers: [
+        .apt(["swift-syntax-dev"]) // Or your preferred package manager
+    ]
+)
+\`\`\`
+
+### Manual Integration
+
+1. Copy \`libSwiftSyntaxWrapper.a\` to your library search path
+2. Copy the \`.swiftmodule\` directory to your module search path
+3. Link against the library: \`-lSwiftSyntaxWrapper\`
+
+### Swift Build Flags
+
+When building, you may need:
+
+\`\`\`bash
+swift build -Xlinker -L/path/to/lib -Xlinker -lSwiftSyntaxWrapper
+\`\`\`
+
+## Version
+
+SwiftSyntax version: $SWIFT_SYNTAX_VERSION
+Built with Swift: $SWIFT_VERSION
+EOF
+
+# Step 7: Create tarball
+echo "Creating tarball..."
+cd "$WORK_DIR"
+tar -czf "$FINAL_TAR_NAME" "SwiftSyntax-linux"
+
+echo "Computing checksum..."
+if command -v sha256sum &> /dev/null; then
+    CHECKSUM=$(sha256sum "$FINAL_TAR_NAME" | cut -d' ' -f1)
+elif command -v shasum &> /dev/null; then
+    CHECKSUM=$(shasum -a 256 "$FINAL_TAR_NAME" | cut -d' ' -f1)
+else
+    echo "Warning: No checksum utility found"
+    CHECKSUM="unknown"
+fi
+
+echo "Build complete."
+echo "Linux Binary: $WORK_DIR/$FINAL_TAR_NAME"
+echo "Checksum: $CHECKSUM"
+
+# Output usage example
+cat << EOF
+
+Example usage in a Linux Swift project:
+
+1. Download and extract:
+   wget https://github.com/ARISTIDE021/SwiftSyntaxBinaries/releases/download/${SWIFT_SYNTAX_VERSION}/${FINAL_TAR_NAME}
+   tar -xzf ${FINAL_TAR_NAME}
+
+2. In your Package.swift:
+   .systemLibrary(name: "SwiftSyntaxWrapper")
+
+3. Build with:
+   swift build -Xlinker -L./SwiftSyntax-linux/lib -Xlinker -lSwiftSyntaxWrapper
+
+EOF
+
+# For GitHub Actions
+if [[ "$TEST_MODE" == "false" && -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo "linux_binary=$WORK_DIR/$FINAL_TAR_NAME" >> "$GITHUB_OUTPUT"
+  echo "linux_checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+  echo "Output variables set for GitHub Actions."
+fi
+
+echo "Linux build completed successfully!"
+exit 0
+
+================
+File: Package.swift
+================
+// swift-tools-version:5.9
+import PackageDescription
+
+let package = Package(
+    name: "SwiftSyntaxBinaries",
+    platforms: [
+        .macOS(.v10_15)
+    ],
+    products: [
+        .library(
+            name: "SwiftSyntaxWrapper",
+            targets: ["SwiftSyntaxWrapper"]
+        ),
+    ],
+    targets: [
+        .binaryTarget(
+            name: "SwiftSyntaxWrapper",
+            url: "https://github.com/Aristide021/SwiftSyntaxBinaries/releases/download/601.0.1/SwiftSyntax.xcframework.zip",
+            checksum: "16b62d34b32d0e5ddff11972eacc13393e2025ecc988ba2bee11e7d25b53cfbd"
+        )
+    ]
+)
+
+================
+File: scripts/build_xcframework.sh
+================
+#!/bin/bash
+set -euo pipefail
+
+# Function to display usage
+usage() {
+    echo "Usage: $0 [-t] <swift-syntax-version>"
+    echo "  -t, --test  Test build locally without creating a GitHub release"
+    echo "  <swift-syntax-version> The version tag to build (e.g., 600.0.1)"
+    exit 1
+}
+
+# Parse arguments
+TEST_MODE=false
+SWIFT_SYNTAX_VERSION=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -t|--test)
+            TEST_MODE=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            if [[ -z "$SWIFT_SYNTAX_VERSION" ]]; then
+                SWIFT_SYNTAX_VERSION="$1"
+                shift
+            else
+                echo "Unknown parameter: $1"
+                usage
+            fi
+            ;;
+    esac
+done
+
+if [[ -z "$SWIFT_SYNTAX_VERSION" ]]; then
+    echo "Error: Swift Syntax version is required"
+    usage
+fi
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+REPO_ROOT_DIR="$SCRIPT_DIR/.."
+WORK_DIR="$REPO_ROOT_DIR/temp_build"
+SWIFT_SYNTAX_DIR="$WORK_DIR/swift-syntax"
+WRAPPER_PKG_DIR="$WORK_DIR/SwiftSyntaxWrapperPkg"
+ARCHIVE_DIR="$WORK_DIR/archives"
+FINAL_XCFRAMEWORK_NAME="SwiftSyntax.xcframework"
+FINAL_ZIP_NAME="SwiftSyntax.xcframework.zip"
+REPO_URL="https://github.com/apple/swift-syntax.git"
+WRAPPER_SCHEME_NAME="SwiftSyntaxWrapper"
+
+# Determine Swift tools version 
+SWIFT_VERSION=$(swift --version | head -n 1 | sed -E 's/.*Swift version ([0-9]+\.[0-9]+).*/\1/')
+echo "Detected Swift version: $SWIFT_VERSION"
+SWIFT_TOOLS_VERSION="5.7" # Default
+if [[ $(echo "$SWIFT_VERSION >= 5.9" | bc) -eq 1 ]]; then
+    SWIFT_TOOLS_VERSION="5.9"
+elif [[ $(echo "$SWIFT_VERSION >= 5.8" | bc) -eq 1 ]]; then
+    SWIFT_TOOLS_VERSION="5.8"
+fi
+echo "Using Swift tools version: $SWIFT_TOOLS_VERSION"
+
+# Clean up any previous build
+rm -rf "$WORK_DIR"
+mkdir -p "$ARCHIVE_DIR"
+mkdir -p "$WORK_DIR/DerivedData"
+
+# Step 1: Clone swift-syntax at the specified tag
+echo "Cloning swift-syntax $SWIFT_SYNTAX_VERSION..."
+git clone --branch "$SWIFT_SYNTAX_VERSION" --depth 1 "$REPO_URL" "$SWIFT_SYNTAX_DIR"
+
+# Step 2: Create the wrapper package
+echo "Creating SwiftSyntaxWrapper package..."
+mkdir -p "$WRAPPER_PKG_DIR/Sources/SwiftSyntaxWrapper"
+
+# Create Package.swift
+cat > "$WRAPPER_PKG_DIR/Package.swift" << EOF
+// swift-tools-version:$SWIFT_TOOLS_VERSION
+import PackageDescription
+
+let package = Package(
+    name: "SwiftSyntaxWrapperPkg",
+    platforms: [
+        .macOS(.v10_15),
+        .iOS(.v13),
+        .tvOS(.v13),
+        .watchOS(.v6),
+        .macCatalyst(.v13)
+    ],
+    products: [
+        .library(
+            name: "SwiftSyntaxWrapper",
+            type: .static,
+            targets: ["SwiftSyntaxWrapper"]
+        )
+    ],
+    dependencies: [
+        .package(path: "$SWIFT_SYNTAX_DIR")
+    ],
+    targets: [
+        .target(
+            name: "SwiftSyntaxWrapper",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxBuilder", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftDiagnostics", package: "swift-syntax"),
+                .product(name: "SwiftBasicFormat", package: "swift-syntax"),
+                .product(name: "SwiftOperators", package: "swift-syntax"),
+                .product(name: "SwiftParserDiagnostics", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ]
+        )
+    ]
+)
+EOF
+
+# Create wrapper Swift file with @_exported imports
+cat > "$WRAPPER_PKG_DIR/Sources/SwiftSyntaxWrapper/SwiftSyntaxWrapper.swift" << EOF
+// This file re-exports all the necessary SwiftSyntax modules
+@_exported import SwiftSyntax
+@_exported import SwiftParser
+@_exported import SwiftSyntaxBuilder
+@_exported import SwiftSyntaxMacros
+@_exported import SwiftDiagnostics
+@_exported import SwiftBasicFormat
+@_exported import SwiftOperators
+@_exported import SwiftParserDiagnostics
+@_exported import SwiftSyntaxMacroExpansion
+@_exported import SwiftCompilerPlugin
+
+// No actual code is needed in this file.
+EOF
+
+# Define all platforms to build for
+PLATFORMS=(
+    "macOS"
+)
+
+# Function to extract architecture from library
+extract_arch_from_library() {
+    local LIB_PATH="$1"
+    local TARGET_ARCH="$2"
+    local OUTPUT_PATH="$3"
+    
+    echo "Extracting $TARGET_ARCH architecture from $LIB_PATH to $OUTPUT_PATH..."
+    
+    # Create a temporary directory
+    local TEMP_DIR=$(mktemp -d)
+    
+    # Check if the library is a universal (fat) binary
+    local ARCHS=$(lipo -archs "$LIB_PATH" 2>/dev/null || echo "unknown")
+    echo "Library architectures: $ARCHS"
+    
+    if [[ "$ARCHS" == *"$TARGET_ARCH"* ]]; then
+        # Library contains our target architecture
+        if [[ "$ARCHS" == *" "* ]]; then
+            # Multiple architectures - extract just the one we want
+            lipo -extract "$TARGET_ARCH" "$LIB_PATH" -output "$TEMP_DIR/lib.a"
+            cp "$TEMP_DIR/lib.a" "$OUTPUT_PATH"
+        else
+            # Single architecture - just copy it
+            cp "$LIB_PATH" "$OUTPUT_PATH"
+        fi
+        
+        echo "Extracted architecture $TARGET_ARCH to $OUTPUT_PATH"
+        echo "Checking result:"
+        lipo -info "$OUTPUT_PATH" || echo "Could not get lipo info for $OUTPUT_PATH"
+        file "$OUTPUT_PATH"
+        
+        # Clean up
+        rm -rf "$TEMP_DIR"
+        return 0
+    else
+        echo "Error: Library does not contain $TARGET_ARCH architecture"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+}
+
+# Function to build using swift build for a specific architecture
+build_for_arch() {
+    local PLATFORM="$1"
+    local ARCH="$2"
+    local PLATFORM_TRIPLET="$3"
+    local ARCHIVE_PATH="$4"
+
+    echo "Building $PLATFORM for $ARCH architecture..."
+
+    # Determine SDK (unchanged)
+    local SDK=""
+    case "$PLATFORM" in
+        "macOS") SDK="macosx" ;;
+        "iOS") SDK="iphoneos" ;;
+        "iOS Simulator") SDK="iphonesimulator" ;;
+        "tvOS") SDK="appletvos" ;;
+        "tvOS Simulator") SDK="appletvsimulator" ;;
+        "watchOS") SDK="watchos" ;;
+        "watchOS Simulator") SDK="watchsimulator" ;;
+        *) echo "Unknown platform: $PLATFORM"; return 1 ;;
+    esac
+
+    local SDKROOT=$(xcrun --sdk $SDK --show-sdk-path)
+    echo "Using SDK: $SDK, Path: $SDKROOT, Architecture: $ARCH"
+
+    # Build using swift build
+    local BUILD_DIR="$WORK_DIR/DerivedData/$PLATFORM-$ARCH"
+
+    # Remove any previous build artifacts
+    rm -rf "$BUILD_DIR"
+    mkdir -p "$BUILD_DIR"
+
+    cd "$WRAPPER_PKG_DIR"
+    echo "Resolving package dependencies..."
+    swift package resolve
+
+    echo "Building $PLATFORM ($ARCH) with swift build..."
+
+    # Add -Xcc "-target" flag to match -Xswiftc "-target"
+    swift build \
+        -c release \
+        --build-path "$BUILD_DIR" \
+        -Xswiftc "-sdk" -Xswiftc "$SDKROOT" \
+        -Xcc "-isysroot" -Xcc "$SDKROOT" \
+        -Xcc "-fmodules" \
+        -Xcc "-fimplicit-modules" \
+        -Xcc "-fimplicit-module-maps" \
+        -Xswiftc "-target" -Xswiftc "$PLATFORM_TRIPLET" \
+        -Xcc "-target" -Xcc "$PLATFORM_TRIPLET" \
+        -Xswiftc "-emit-module-interface" # Add this flag to generate .swiftinterface files
+
+    # Find the built library (unchanged)
+    local LIB_FILE=$(find "$BUILD_DIR" -name "libSwiftSyntaxWrapper.a" | head -n 1)
+    if [ -z "$LIB_FILE" ]; then
+        echo "Could not find library in expected location, searching entire build directory..."
+        LIB_FILE=$(find "$BUILD_DIR" -type f -name "*.a" | grep -i "SwiftSyntaxWrapper" | head -n 1)
+    fi
+
+    if [ -n "$LIB_FILE" ]; then
+        echo "Found library at: $LIB_FILE"
+        local FILE_INFO=$(file "$LIB_FILE")
+        echo "Library file info: $FILE_INFO"
+
+        # Create directory for the architecture-specific library (unchanged)
+        mkdir -p "$ARCHIVE_PATH/Products/usr/local/lib/$ARCH"
+        local ARCH_LIB_PATH="$ARCHIVE_PATH/Products/usr/local/lib/$ARCH/libSwiftSyntaxWrapper.a"
+
+        # Extract the correct architecture (unchanged)
+        if extract_arch_from_library "$LIB_FILE" "$ARCH" "$ARCH_LIB_PATH"; then
+            echo "Successfully extracted $ARCH architecture to $ARCH_LIB_PATH"
+        else
+            echo "Warning: Could not extract $ARCH architecture. Copying library directly."
+            cp "$LIB_FILE" "$ARCH_LIB_PATH"
+        fi
+
+        # --- Improved Module Directory Finding and Copying ---
+        local MODULE_DIR=""
+        # Updated path to where Swift actually places the modules
+        local EXPECTED_MODULE_DIR="$BUILD_DIR/$PLATFORM_TRIPLET/release/Modules/SwiftSyntaxWrapper.swiftmodule"
+        local FALLBACK_MODULE_DIR="$BUILD_DIR/Modules/SwiftSyntaxWrapper.swiftmodule"
+        local GENERIC_MODULE_PATH="$BUILD_DIR/release/Modules/SwiftSyntaxWrapper.swiftmodule"
+        local DEST_MODULE_DIR="$ARCHIVE_PATH/Products/usr/local/lib/swift/static/SwiftSyntaxWrapper.swiftmodule"
+
+        # Check for module directory in multiple possible locations
+        if [ -d "$EXPECTED_MODULE_DIR" ]; then
+            MODULE_DIR="$EXPECTED_MODULE_DIR"
+            echo "Found module at expected location: $MODULE_DIR"
+        elif [ -d "$FALLBACK_MODULE_DIR" ]; then
+            MODULE_DIR="$FALLBACK_MODULE_DIR"
+            echo "Found module at fallback location: $MODULE_DIR"
+        elif [ -d "$GENERIC_MODULE_PATH" ]; then
+            MODULE_DIR="$GENERIC_MODULE_PATH"
+            echo "Found module at generic location: $MODULE_DIR"
+        else
+            echo "Module directory not found at expected paths. Searching..."
+            # Search for any .swiftmodule directory
+            MODULE_DIR=$(find "$BUILD_DIR" -path "*/Modules/SwiftSyntaxWrapper.swiftmodule" -type d | head -n 1)
+            
+            if [ -z "$MODULE_DIR" ]; then
+                # Try a broader search if the specific path didn't work
+                MODULE_DIR=$(find "$BUILD_DIR" -path "*SwiftSyntaxWrapper.swiftmodule" -type d | head -n 1)
+            fi
+        fi
+
+        if [ -n "$MODULE_DIR" ]; then
+            echo "Found module at: $MODULE_DIR"
+            mkdir -p "$DEST_MODULE_DIR"
+
+            # Copy all relevant module files from the build output
+            echo "Copying module files from $MODULE_DIR to $DEST_MODULE_DIR"
+            cp -r "$MODULE_DIR/"* "$DEST_MODULE_DIR/"
+
+            # Verify copied files
+            echo "Contents of destination module directory:"
+            ls -la "$DEST_MODULE_DIR"
+        else
+            # If we still can't find the modules, let's look for individual module files
+            local MODULE_FILES=$(find "$BUILD_DIR" -name "*.swiftmodule" -o -name "*.swiftdoc" -o -name "*.swiftsourceinfo" -o -name "*.swiftinterface" | grep -i "SwiftSyntaxWrapper")
+            
+            if [ -n "$MODULE_FILES" ]; then
+                echo "Found individual module files. Copying them to destination..."
+                mkdir -p "$DEST_MODULE_DIR"
+                
+                # Copy each file
+                echo "$MODULE_FILES" | while read -r file; do
+                    echo "Copying $file to $DEST_MODULE_DIR/"
+                    cp "$file" "$DEST_MODULE_DIR/"
+                done
+                
+                # Verify copied files
+                echo "Contents of destination module directory after individual file copy:"
+                ls -la "$DEST_MODULE_DIR"
+            else
+                # Placeholder logic as a last resort
+                echo "Could not find module files. Creating placeholder..."
+                mkdir -p "$DEST_MODULE_DIR"
+                echo "Creating placeholder swiftmodule files for $ARCH"
+                touch "$DEST_MODULE_DIR/$ARCH.swiftmodule"
+                touch "$DEST_MODULE_DIR/$ARCH.swiftdoc"
+                cat > "$DEST_MODULE_DIR/$ARCH.swiftinterface" << EOF
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version ${SWIFT_VERSION}
+// Placeholder interface - actual build failed to produce module files.
+import Swift
+@_exported import SwiftSyntax
+@_exported import SwiftParser
+@_exported import SwiftSyntaxBuilder
+@_exported import SwiftSyntaxMacros
+@_exported import SwiftDiagnostics
+@_exported import SwiftBasicFormat
+@_exported import SwiftOperators
+@_exported import SwiftParserDiagnostics
+@_exported import SwiftSyntaxMacroExpansion
+@_exported import SwiftCompilerPlugin
+EOF
+            fi
+        fi
+        # --- End of Module Directory Improvement ---
+
+        return 0 # Success
+    else
+        echo "Error: Could not find built library for $PLATFORM ($ARCH)"
+        find "$BUILD_DIR" -type f -name "*.a" | sort
+        return 1 # Error
+    fi
+}
+
+# Function to build for each platform
+build_platform() {
+    local PLATFORM="$1"
+    
+    echo "Building archive for $PLATFORM..."
+    
+    # Convert platform name to a suitable archive name (no spaces)
+    local ARCHIVE_NAME=$(echo "$PLATFORM" | tr -d ' ')
+    local ARCHIVE_PATH="$ARCHIVE_DIR/${ARCHIVE_NAME}.xcarchive"
+    
+    # Create necessary directories for archive structure
+    mkdir -p "$ARCHIVE_PATH/Products/usr/local/lib"
+    mkdir -p "$ARCHIVE_PATH/Products/usr/local/lib/swift/static"
+    
+    # Determine architectures and triplets based on platform
+    local ARCHS=()
+    local PLATFORM_TRIPLETS=()
+    local BUILD_RESULTS=()
+    
+    case "$PLATFORM" in
+        "macOS")
+            ARCHS=("arm64" "x86_64")
+            PLATFORM_TRIPLETS=("arm64-apple-macosx10.15" "x86_64-apple-macosx10.15")
+            ;;
+        "iOS")
+            ARCHS=("arm64")
+            PLATFORM_TRIPLETS=("arm64-apple-ios13.0")
+            ;;
+        "iOS Simulator")
+            ARCHS=("arm64" "x86_64")
+            PLATFORM_TRIPLETS=("arm64-apple-ios13.0-simulator" "x86_64-apple-ios13.0-simulator")
+            ;;
+        "tvOS")
+            ARCHS=("arm64")
+            PLATFORM_TRIPLETS=("arm64-apple-tvos13.0")
+            ;;
+        "tvOS Simulator")
+            ARCHS=("arm64" "x86_64")
+            PLATFORM_TRIPLETS=("arm64-apple-tvos13.0-simulator" "x86_64-apple-tvos13.0-simulator")
+            ;;
+        "watchOS")
+            ARCHS=("arm64")
+            PLATFORM_TRIPLETS=("arm64-apple-watchos6.0")
+            ;;
+        "watchOS Simulator")
+            ARCHS=("arm64" "x86_64")
+            PLATFORM_TRIPLETS=("arm64-apple-watchos6.0-simulator" "x86_64-apple-watchos6.0-simulator")
+            ;;
+        *)
+            echo "Unknown platform: $PLATFORM"
+            return 1
+            ;;
+    esac
+    
+    # Build each architecture separately
+    local ALL_ARCHS_BUILT=true
+    for i in "${!ARCHS[@]}"; do
+        if build_for_arch "$PLATFORM" "${ARCHS[$i]}" "${PLATFORM_TRIPLETS[$i]}" "$ARCHIVE_PATH"; then
+            echo "Successfully built ${ARCHS[$i]} for $PLATFORM"
+            BUILD_RESULTS+=("success")
+        else
+            echo "Failed to build ${ARCHS[$i]} for $PLATFORM"
+            BUILD_RESULTS+=("failure")
+            ALL_ARCHS_BUILT=false
+        fi
+    done
+    
+    # Create fat library if multiple architectures were built successfully
+    local ARCH_LIBS=()
+    for i in "${!ARCHS[@]}"; do
+        local ARCH_LIB="$ARCHIVE_PATH/Products/usr/local/lib/${ARCHS[$i]}/libSwiftSyntaxWrapper.a"
+        if [ -f "$ARCH_LIB" ] && [ "${BUILD_RESULTS[$i]}" == "success" ]; then
+            # Verify we have the correct architecture in this file
+            echo "Verifying architecture of $ARCH_LIB"
+            if lipo -info "$ARCH_LIB" 2>/dev/null | grep -q "${ARCHS[$i]}"; then
+                echo "$ARCH_LIB contains ${ARCHS[$i]} architecture"
+                ARCH_LIBS+=("$ARCH_LIB")
+            else
+                echo "Warning: $ARCH_LIB does not contain ${ARCHS[$i]} architecture"
+            fi
+        fi
+    done
+    
+    # If we have multiple architecture libraries, create a fat binary
+    if [ ${#ARCH_LIBS[@]} -gt 1 ]; then
+        echo "Creating fat library from: ${ARCH_LIBS[*]}"
+        lipo -create "${ARCH_LIBS[@]}" -output "$ARCHIVE_PATH/Products/usr/local/lib/libSwiftSyntaxWrapper.a"
+        
+        # Verify the fat binary
+        echo "Verifying fat library:"
+        lipo -info "$ARCHIVE_PATH/Products/usr/local/lib/libSwiftSyntaxWrapper.a" || true
+        file "$ARCHIVE_PATH/Products/usr/local/lib/libSwiftSyntaxWrapper.a"
+    elif [ ${#ARCH_LIBS[@]} -eq 1 ]; then
+        # Just use the single architecture
+        echo "Only one architecture built successfully, using that one"
+        cp "${ARCH_LIBS[0]}" "$ARCHIVE_PATH/Products/usr/local/lib/libSwiftSyntaxWrapper.a"
+    else
+        echo "Error: No architectures were built successfully"
+        return 1
+    fi
+    
+    # Clean up individual architecture directories
+    for ARCH in "${ARCHS[@]}"; do
+        rm -rf "$ARCHIVE_PATH/Products/usr/local/lib/$ARCH"
+    done
+    
+    # Examine the archive structure
+    echo "Examining archive structure for $PLATFORM..."
+    find "$ARCHIVE_PATH" -type f | grep -v ".DS_Store" | sort
+    
+    if [ -f "$ARCHIVE_PATH/Products/usr/local/lib/libSwiftSyntaxWrapper.a" ]; then
+        return 0
+    else
+        echo "Error: Final library not found at expected location"
+        return 1
+    fi
+}
+
+# Build archives for each platform
+XCFRAMEWORK_ARGS=()
+
+for PLATFORM in "${PLATFORMS[@]}"; do
+    if build_platform "$PLATFORM"; then
+        echo "Successfully built platform: $PLATFORM"
+        
+        # Convert platform name to a suitable archive name (no spaces)
+        ARCHIVE_NAME=$(echo "$PLATFORM" | tr -d ' ')
+        ARCHIVE_PATH="$ARCHIVE_DIR/${ARCHIVE_NAME}.xcarchive"
+        
+        # Look for static library
+        LIB_PATH=$(find "$ARCHIVE_PATH" -name "libSwiftSyntaxWrapper.a" | head -n 1)
+        if [ -n "$LIB_PATH" ]; then
+            echo "Found static library at: $LIB_PATH"
+            
+            # Find headers/module path
+            MODULE_DIR=$(find "$ARCHIVE_PATH" -path "*/SwiftSyntaxWrapper.swiftmodule" -type d | head -n 1)
+            if [ -n "$MODULE_DIR" ]; then
+                echo "Found module directory at: $MODULE_DIR"
+                HEADERS_DIR=$(dirname "$MODULE_DIR")
+                XCFRAMEWORK_ARGS+=("-library" "$LIB_PATH" "-headers" "$HEADERS_DIR")
+            else
+                echo "Error: Could not find Swift module directory for $PLATFORM"
+                exit 1
+            fi
+        else
+            echo "Error: Could not find library in archive for $PLATFORM"
+            exit 1
+        fi
+    else
+        echo "Failed to build platform: $PLATFORM"
+        # Continue with other platforms rather than stopping completely
+        echo "Continuing with other platforms..."
+    fi
+done
+
+if [ ${#XCFRAMEWORK_ARGS[@]} -eq 0 ]; then
+    echo "Error: No platforms were built successfully"
+    exit 1
+fi
+
+# Create XCFramework
+echo "Creating XCFramework..."
+echo "xcframework arguments: ${XCFRAMEWORK_ARGS[@]}"
+xcodebuild -create-xcframework ${XCFRAMEWORK_ARGS[@]} -output "$WORK_DIR/$FINAL_XCFRAMEWORK_NAME"
+
+echo "Inspecting XCFramework structure..."
+ls -la "$WORK_DIR/$FINAL_XCFRAMEWORK_NAME"
+find "$WORK_DIR/$FINAL_XCFRAMEWORK_NAME" -type f | grep -v ".DS_Store" | sort
+
+# Zip XCFramework and compute checksum
+echo "Zipping XCFramework..."
+(cd "$WORK_DIR" && zip -r "$FINAL_ZIP_NAME" "$FINAL_XCFRAMEWORK_NAME")
+
+echo "Computing checksum..."
+CHECKSUM=$(swift package compute-checksum "$WORK_DIR/$FINAL_ZIP_NAME")
+
+echo "Build complete."
+echo "XCFramework Zip: $WORK_DIR/$FINAL_ZIP_NAME"
+echo "Checksum: $CHECKSUM"
+
+# Output a Package.swift snippet that can be used to import this binary
+cat << EOF
+
+Example Package.swift snippet to use this binary:
+
+.binaryTarget(
+    name: "SwiftSyntax",
+    url: "https://github.com/ARISTIDE021/SwiftSyntaxBinaries/releases/download/${SWIFT_SYNTAX_VERSION}/${FINAL_ZIP_NAME}",
+    checksum: "${CHECKSUM}"
+),
+
+EOF
+
+# For GitHub Actions
+if [[ "$TEST_MODE" == "false" && -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo "framework_zip=$WORK_DIR/$FINAL_ZIP_NAME" >> "$GITHUB_OUTPUT"
+  echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+  echo "Output variables set for GitHub Actions."
+fi
+
+echo "Local testing completed successfully!"
+exit 0
+
+================
+File: .gitignore
+================
+# Xcode
+#
+# gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
+
+## User settings
+xcuserdata/
+
+## Build generated
+build/
+DerivedData/
+temp_build/
+
+## Various settings
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+## Other
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+.DS_Store
+
+## Obj-C/Swift specific
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+#
+# Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
+Packages/
+Package.pins
+Package.resolved
+.build/
+.swiftpm/
+
+# CocoaPods
+#
+# We recommend against adding the Pods directory to your .gitignore. However
+# you should judge for yourself, the pros and cons are mentioned at:
+# https://guides.cocoapods.org/using/using-cocoapods.html#should-i-check-the-pods-directory-into-source-control
+#
+Pods/
+
+# Carthage
+#
+# Add this line if you want to avoid checking in source code from Carthage dependencies.
+Carthage/Checkouts
+Carthage/Build/
+
+# SPM binary targets support
+*.xcframework
+*.xcframework.zip
+*.framework
+*.framework.zip
+
+# Project specific
+temp_experiment/swift-syntax/
+temp_build/
+
+================
+File: LICENSE
+================
+MIT License
+
+Copyright (c) 2025 Sheldon Aristide
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================
+File: README.md
+================
+# SwiftSyntaxBinaries
+
+This repository automatically tracks and builds XCFramework releases corresponding to official [apple/swift-syntax](https://github.com/apple/swift-syntax) tags. Each release provides a pre-built XCFramework that can be easily integrated into Swift packages or Xcode projects.
+
+## Overview
+
+- GitHub Actions workflow automatically tracks new SwiftSyntax releases and builds corresponding XCFrameworks.
+- Runs weekly with a 2-week cooldown period after each release to avoid excessive builds.
+- Also supports manual triggering with specific SwiftSyntax tags.
+- Supports macOS (Universal: arm64 + x86_64).
+- **Linux support coming August 2025** - Static libraries with Swift modules.
+- Each release includes a zipped XCFramework and its checksum for use as a binary target.
+
+## Usage
+
+### macOS (Available Now)
+
+To use a pre-built SwiftSyntax XCFramework in your Swift package:
+
+```swift
+.binaryTarget(
+    name: "SwiftSyntaxWrapper",
+    url: "https://github.com/ARISTIDE021/SwiftSyntaxBinaries/releases/download/<TAG>/SwiftSyntax.xcframework.zip",
+    checksum: "<CHECKSUM>"
+)
+```
+
+Replace `<TAG>` and `<CHECKSUM>` with the release tag and checksum from the corresponding release.
+
+### Linux (Coming August 2025)
+
+Linux static libraries will be available as `.tar.gz` archives containing:
+- `lib/libSwiftSyntaxWrapper.a` - Static library
+- `include/SwiftSyntaxWrapper.swiftmodule/` - Swift module interfaces
+
+Usage will be:
+```bash
+# Download and extract
+wget https://github.com/ARISTIDE021/SwiftSyntaxBinaries/releases/download/<TAG>/SwiftSyntax-linux.tar.gz
+tar -xzf SwiftSyntax-linux.tar.gz
+
+# Build your project
+swift build -Xlinker -L./SwiftSyntax-linux/lib -Xlinker -lSwiftSyntaxWrapper
+```
+
+## Build Process
+
+### Automatic Builds
+1. The workflow runs weekly on Mondays to check for new SwiftSyntax releases.
+2. If a new release is found and we're not in a cooldown period, it proceeds to build.
+3. Cooldown period: 2 weeks after any release to prevent excessive builds.
+
+### Manual Builds
+1. The workflow can be triggered manually with a specific SwiftSyntax tag.
+2. Manual builds bypass the cooldown period.
+
+### Build Steps
+1. The build script clones the specified tag from apple/swift-syntax.
+2. Builds are performed for macOS (arm64, x86_64) using `swift build` via a temporary wrapper package.
+3. An XCFramework is created from the resulting static libraries and module files.
+4. The XCFramework is zipped and its checksum is computed.
+5. The zipped framework and checksum are attached to a GitHub release matching the tag.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
+
+================
+File: .github/workflows/build_release.yml
+================
+name: Build and Release Latest SwiftSyntax XCFramework and Linux Binary
+
+on:
+  workflow_dispatch: # Allows manual triggering (for testing or specific tag)
+    inputs:
+      swift_syntax_tag:
+        description: 'MANUAL SwiftSyntax tag to build (e.g., 601.0.1). If empty on manual run, tries latest.'
+        required: false
+      force_build:
+        description: 'Force build even if tag exists? (true/false)'
+        required: false
+        default: false
+        type: boolean
+
+  schedule:
+    - cron: '0 0 * * 1' # Runs weekly on Mondays (with 2-week cooldown after releases)
+
+jobs:
+  check_and_build_macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write # To create releases
+    outputs: # Not strictly needed anymore if build is in same job, but good for clarity
+      tag_to_build: ${{ steps.get_release_info.outputs.tag_name }}
+      release_notes: ${{ steps.get_release_info.outputs.release_body }}
+      should_build: ${{ steps.get_release_info.outputs.should_build_flag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI (gh)
+        run: |
+          # Ensure gh is available. macos-latest usually has it.
+          # If not, you might need: brew install gh
+          gh --version
+
+      - name: Check cooldown period
+        id: check_cooldown
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking if we're in cooldown period (2 weeks since last release)..."
+          
+          # Get the latest release from our repo
+          LATEST_OUR_RELEASE=$(gh api "repos/${{ github.repository }}/releases/latest" 2>/dev/null || echo "{}")
+          
+          if [[ "$(echo "$LATEST_OUR_RELEASE" | jq -e '.published_at' 2>/dev/null)" != "null" ]]; then
+            LAST_RELEASE_DATE=$(echo "$LATEST_OUR_RELEASE" | jq -r '.published_at')
+            LAST_RELEASE_TIMESTAMP=$(date -d "$LAST_RELEASE_DATE" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$LAST_RELEASE_DATE" +%s)
+            CURRENT_TIMESTAMP=$(date +%s)
+            COOLDOWN_SECONDS=$((14 * 24 * 60 * 60)) # 2 weeks in seconds
+            TIME_SINCE_RELEASE=$((CURRENT_TIMESTAMP - LAST_RELEASE_TIMESTAMP))
+            
+            if [[ $TIME_SINCE_RELEASE -lt $COOLDOWN_SECONDS ]]; then
+              DAYS_REMAINING=$(((COOLDOWN_SECONDS - TIME_SINCE_RELEASE) / 86400))
+              echo "Still in cooldown period. $DAYS_REMAINING days remaining."
+              echo "in_cooldown=true" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "Cooldown period expired. Proceeding with checks."
+              echo "in_cooldown=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No previous releases found. Proceeding with checks."
+            echo "in_cooldown=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get SwiftSyntax Release Information
+        id: get_release_info
+        if: github.event_name == 'workflow_dispatch' || steps.check_cooldown.outputs.in_cooldown != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub token for API calls
+          # GITHUB_REPOSITORY is your repo: ARISTIDE021/SwiftSyntaxBinaries
+        run: |
+          TARGET_TAG=""
+          FORCE_BUILD=${{ github.event.inputs.force_build || 'false' }}
+
+          # If a specific tag is provided via manual dispatch, use that.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.swift_syntax_tag }}" ]]; then
+            TARGET_TAG="${{ github.event.inputs.swift_syntax_tag }}"
+            echo "Manual trigger for specific tag: $TARGET_TAG"
+            # Fetch its release notes if it's a known release
+            RELEASE_INFO_JSON=$(gh api "repos/apple/swift-syntax/releases/tags/$TARGET_TAG" || echo "{}")
+            IS_PRERELEASE=$(echo "$RELEASE_INFO_JSON" | jq -r '.prerelease // "false"') # Default to not prerelease if info missing
+
+            if [[ "$IS_PRERELEASE" == "true" && "$FORCE_BUILD" != "true" ]]; then
+                echo "Tag $TARGET_TAG is a pre-release. Skipping unless force_build is true."
+                echo "should_build_flag=false" >> $GITHUB_OUTPUT
+                exit 0
+            fi
+            RELEASE_BODY=$(echo "$RELEASE_INFO_JSON" | jq -r '.body // "No description available for this tag."')
+
+          else # Scheduled run or manual run without specific tag: Fetch latest official release
+            echo "Scheduled run or manual 'latest' run: Fetching latest stable release from apple/swift-syntax..."
+            # Get the latest non-prerelease, non-draft release
+            LATEST_RELEASE_JSON=$(gh api repos/apple/swift-syntax/releases/latest)
+
+            if [[ -z "$LATEST_RELEASE_JSON" || "$(echo "$LATEST_RELEASE_JSON" | jq -e '.tag_name' 2>/dev/null)" == "null" ]]; then
+              echo "Could not fetch latest release information from apple/swift-syntax or no releases found."
+              echo "should_build_flag=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            TARGET_TAG=$(echo "$LATEST_RELEASE_JSON" | jq -r '.tag_name')
+            RELEASE_BODY=$(echo "$LATEST_RELEASE_JSON" | jq -r '.body')
+
+            if [[ -z "$TARGET_TAG" ]]; then
+                echo "Failed to extract tag_name from latest release."
+                echo "should_build_flag=false" >> $GITHUB_OUTPUT
+                exit 0
+            fi
+            echo "Latest official apple/swift-syntax release tag: $TARGET_TAG"
+          fi
+
+          # Check if this tag already has a release in ARISTIDE021/SwiftSyntaxBinaries
+          echo "Checking for existing release of $TARGET_TAG in ${{ github.repository }}..."
+          EXISTING_RELEASE_JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG")
+
+          if [[ -n "$EXISTING_RELEASE_JSON" && "$(echo "$EXISTING_RELEASE_JSON" | jq -e '.tag_name' 2>/dev/null)" != "null" && "$FORCE_BUILD" != "true" ]]; then
+            echo "Release for tag $TARGET_TAG already exists in ${{ github.repository }}. Nothing to do."
+            echo "should_build_flag=false" >> $GITHUB_OUTPUT
+          else
+            if [[ "$FORCE_BUILD" == "true" ]]; then
+                echo "Force building for tag $TARGET_TAG."
+            else
+                echo "New release $TARGET_TAG found (or no existing release). Proceeding to build."
+            fi
+            echo "should_build_flag=true" >> $GITHUB_OUTPUT
+            echo "tag_name=$TARGET_TAG" >> $GITHUB_OUTPUT
+            # Escape release body for multiline output
+            # Using a delimiter for multiline strings in GITHUB_OUTPUT
+            echo "release_body<<EOF_RELEASE_BODY" >> $GITHUB_OUTPUT
+            echo "$RELEASE_BODY" >> $GITHUB_OUTPUT
+            echo "EOF_RELEASE_BODY" >> $GITHUB_OUTPUT
+            echo "Tag and release body set for build."
+          fi
+
+      - name: Set up Xcode
+        if: steps.get_release_info.outputs.should_build_flag == 'true' && (github.event_name == 'workflow_dispatch' || steps.check_cooldown.outputs.in_cooldown != 'true')
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable # Or specify a particular version
+
+      - name: Build XCFramework
+        if: steps.get_release_info.outputs.should_build_flag == 'true' && (github.event_name == 'workflow_dispatch' || steps.check_cooldown.outputs.in_cooldown != 'true')
+        id: build
+        run: |
+          TAG_TO_BUILD="${{ steps.get_release_info.outputs.tag_name }}"
+          echo "Building for tag: $TAG_TO_BUILD"
+          chmod +x ./scripts/build_xcframework.sh
+          ./scripts/build_xcframework.sh "$TAG_TO_BUILD"
+
+  # TODO: Enable Linux build when GitHub Actions quota resets (August 2025)
+  # build_linux:
+  #   runs-on: ubuntu-latest
+  #   needs: check_and_build_macos
+  #   if: needs.check_and_build_macos.outputs.should_build == 'true' && (github.event_name == 'workflow_dispatch' || needs.check_and_build_macos.outputs.in_cooldown != 'true')
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Install Swift on Linux
+  #       run: |
+  #         # Install Swift for Linux
+  #         wget https://download.swift.org/swift-5.9.2-release/ubuntu2204/swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+  #         tar xzf swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+  #         sudo mv swift-5.9.2-RELEASE-ubuntu22.04 /opt/swift
+  #         echo "/opt/swift/usr/bin" >> $GITHUB_PATH
+  #
+  #     - name: Build Linux Binary
+  #       id: build_linux
+  #       run: |
+  #         TAG_TO_BUILD="${{ needs.check_and_build_macos.outputs.tag_to_build }}"
+  #         echo "Building Linux binary for tag: $TAG_TO_BUILD"
+  #         chmod +x ./scripts/build_linux.sh
+  #         ./scripts/build_linux.sh "$TAG_TO_BUILD"
+
+      - name: Create GitHub Release
+        if: steps.get_release_info.outputs.should_build_flag == 'true' && (github.event_name == 'workflow_dispatch' || steps.check_cooldown.outputs.in_cooldown != 'true')
+        uses: softprops/action-gh-release@v1 # Consider v2 if available and stable
+        with:
+          tag_name: ${{ steps.get_release_info.outputs.tag_name }}
+          name: SwiftSyntax ${{ steps.get_release_info.outputs.tag_name }}
+          body: |
+            ${{ steps.get_release_info.outputs.release_notes }}
+
+            ---
+            **macOS XCFramework**
+            - Checksum: ${{ steps.build.outputs.checksum }}
+            
+            **Linux Binary** (Coming August 2025)
+            - Static library with Swift modules
+            - Compatible with Swift Package Manager
+            
+            Automated build from official SwiftSyntax release.
+          # 'prerelease' field is not set here, so it defaults to 'false' (a stable release)
+          # which is what we want as we're sourcing from apple/swift-syntax's latest stable.
+          files: |
+            ${{ steps.build.outputs.framework_zip }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
+
+================================================================
+End of Codebase
+================================================================

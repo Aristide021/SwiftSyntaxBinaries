@@ -1,4 +1,4 @@
-name: Build and Release Latest SwiftSyntax XCFramework
+name: Build and Release Latest SwiftSyntax XCFramework and Linux Binary
 
 on:
   workflow_dispatch: # Allows manual triggering (for testing or specific tag)
@@ -16,7 +16,7 @@ on:
     - cron: '0 0 * * 1' # Runs weekly on Mondays (with 2-week cooldown after releases)
 
 jobs:
-  check_and_build:
+  check_and_build_macos:
     runs-on: macos-latest
     permissions:
       contents: write # To create releases
@@ -152,6 +152,31 @@ jobs:
           chmod +x ./scripts/build_xcframework.sh
           ./scripts/build_xcframework.sh "$TAG_TO_BUILD"
 
+  # TODO: Enable Linux build when GitHub Actions quota resets (August 2025)
+  # build_linux:
+  #   runs-on: ubuntu-latest
+  #   needs: check_and_build_macos
+  #   if: needs.check_and_build_macos.outputs.should_build == 'true' && (github.event_name == 'workflow_dispatch' || needs.check_and_build_macos.outputs.in_cooldown != 'true')
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Install Swift on Linux
+  #       run: |
+  #         # Install Swift for Linux
+  #         wget https://download.swift.org/swift-5.9.2-release/ubuntu2204/swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+  #         tar xzf swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+  #         sudo mv swift-5.9.2-RELEASE-ubuntu22.04 /opt/swift
+  #         echo "/opt/swift/usr/bin" >> $GITHUB_PATH
+  #
+  #     - name: Build Linux Binary
+  #       id: build_linux
+  #       run: |
+  #         TAG_TO_BUILD="${{ needs.check_and_build_macos.outputs.tag_to_build }}"
+  #         echo "Building Linux binary for tag: $TAG_TO_BUILD"
+  #         chmod +x ./scripts/build_linux.sh
+  #         ./scripts/build_linux.sh "$TAG_TO_BUILD"
+
       - name: Create GitHub Release
         if: steps.get_release_info.outputs.should_build_flag == 'true' && (github.event_name == 'workflow_dispatch' || steps.check_cooldown.outputs.in_cooldown != 'true')
         uses: softprops/action-gh-release@v1 # Consider v2 if available and stable
@@ -162,7 +187,13 @@ jobs:
             ${{ steps.get_release_info.outputs.release_notes }}
 
             ---
-            Checksum: ${{ steps.build.outputs.checksum }}
+            **macOS XCFramework**
+            - Checksum: ${{ steps.build.outputs.checksum }}
+            
+            **Linux Binary** (Coming August 2025)
+            - Static library with Swift modules
+            - Compatible with Swift Package Manager
+            
             Automated build from official SwiftSyntax release.
           # 'prerelease' field is not set here, so it defaults to 'false' (a stable release)
           # which is what we want as we're sourcing from apple/swift-syntax's latest stable.

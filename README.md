@@ -8,9 +8,12 @@ This repository automatically tracks and builds XCFramework releases correspondi
 - Runs weekly with a 2-week cooldown period after each release to avoid excessive builds.
 - Also supports manual triggering with specific SwiftSyntax tags.
 - Supports macOS (Universal: arm64 + x86_64).
+- **Linux support coming August 2025** - Static libraries with Swift modules.
 - Each release includes a zipped XCFramework and its checksum for use as a binary target.
 
 ## Usage
+
+### macOS (Available Now)
 
 To use a pre-built SwiftSyntax XCFramework in your Swift package:
 
@@ -23,6 +26,22 @@ To use a pre-built SwiftSyntax XCFramework in your Swift package:
 ```
 
 Replace `<TAG>` and `<CHECKSUM>` with the release tag and checksum from the corresponding release.
+
+### Linux (Coming August 2025)
+
+Linux static libraries will be available as `.tar.gz` archives containing:
+- `lib/libSwiftSyntaxWrapper.a` - Static library
+- `include/SwiftSyntaxWrapper.swiftmodule/` - Swift module interfaces
+
+Usage will be:
+```bash
+# Download and extract
+wget https://github.com/ARISTIDE021/SwiftSyntaxBinaries/releases/download/<TAG>/SwiftSyntax-linux.tar.gz
+tar -xzf SwiftSyntax-linux.tar.gz
+
+# Build your project
+swift build -Xlinker -L./SwiftSyntax-linux/lib -Xlinker -lSwiftSyntaxWrapper
+```
 
 ## Build Process
 
